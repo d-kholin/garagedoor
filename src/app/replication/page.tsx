@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { toast } from "sonner";
 import { garagePost, getFetcher, useGarage, useGaragePost } from "@/lib/api";
@@ -215,10 +215,29 @@ export default function ReplicationPage() {
   const status = useGarage<GetClusterStatusResponse>("GetClusterStatus", {
     refreshInterval: 30_000,
   });
-  const nodeStats = useGarage<MultiResponse<LocalNodeStatistics>>(
-    "GetNodeStatistics",
-    { params: { node: "*" }, refreshInterval: REFRESH_HEAVY },
+  // Node statistics come from the server's sampler cache — a page load or
+  // poll never triggers a pull against the cluster; a real pull happens only
+  // when the cache outlives the sampling interval or via "Pull fresh".
+  const nodeStats = useSWR<{ ts: number; data: MultiResponse<LocalNodeStatistics> }>(
+    "/api/stats/nodes",
+    getFetcher,
+    { refreshInterval: REFRESH_HEAVY, keepPreviousData: true, revalidateOnFocus: false },
   );
+  const nodeStatsData = nodeStats.data?.data;
+  const [pullingFresh, setPullingFresh] = useState(false);
+  async function pullFreshStats() {
+    setPullingFresh(true);
+    try {
+      const fresh = await getFetcher<{ ts: number; data: MultiResponse<LocalNodeStatistics> }>(
+        "/api/stats/nodes?refresh=true",
+      );
+      nodeStats.mutate(fresh, { revalidate: false });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPullingFresh(false);
+    }
+  }
   const workers = useGaragePost<MultiResponse<WorkerInfo[]>>("ListWorkers", {
     params: { node: "*" },
     body: { busyOnly: false, errorOnly },
@@ -245,23 +264,20 @@ export default function ReplicationPage() {
     }
   }
 
-  const [statsUpdatedAt, setStatsUpdatedAt] = useState<number | null>(null);
-  useEffect(() => {
-    if (nodeStats.data) setStatsUpdatedAt(Date.now());
-  }, [nodeStats.data]);
+  const statsUpdatedAt = nodeStats.data?.ts ?? null;
 
   // Rolling per-node queue history for the chart (null = unreachable).
   const latestReading = useMemo(() => {
-    if (!nodeStats.data) return null;
+    if (!nodeStatsData) return null;
     const values: Record<string, number | null> = {};
-    for (const [id, s] of Object.entries(nodeStats.data.success)) {
+    for (const [id, s] of Object.entries(nodeStatsData.success)) {
       values[id] = s.blockManagerStats?.resyncQueueLen ?? 0;
     }
-    for (const id of Object.keys(nodeStats.data.error)) {
+    for (const id of Object.keys(nodeStatsData.error)) {
       values[id] = null;
     }
     return values;
-  }, [nodeStats.data]);
+  }, [nodeStatsData]);
   const history = useResyncHistory(latestReading);
   const rate = drainRate(history);
 
@@ -289,18 +305,18 @@ export default function ReplicationPage() {
 
   const perNode = useMemo(() => {
     const ids = new Set<string>([
-      ...Object.keys(nodeStats.data?.success ?? {}),
-      ...Object.keys(nodeStats.data?.error ?? {}),
+      ...Object.keys(nodeStatsData?.success ?? {}),
+      ...Object.keys(nodeStatsData?.error ?? {}),
       ...Object.keys(workers.data?.success ?? {}),
     ]);
     return [...ids].sort().map((id) => ({
       id,
-      stats: nodeStats.data?.success?.[id],
-      statsError: nodeStats.data?.error?.[id],
+      stats: nodeStatsData?.success?.[id],
+      statsError: nodeStatsData?.error?.[id],
       workers: workers.data?.success?.[id] ?? [],
       blockErrors: blockErrorsByNode[id],
     }));
-  }, [nodeStats.data, workers.data, blockErrorsByNode]);
+  }, [nodeStatsData, workers.data, blockErrorsByNode]);
 
   const totals = useMemo(() => {
     let queue = 0;
@@ -360,9 +376,19 @@ export default function ReplicationPage() {
         description="Per-node resync queues, background workers, and blocks that are not yet fully replicated."
       >
         <PullIndicator
-          updating={nodeStats.isValidating || workers.isValidating}
+          updating={pullingFresh || nodeStats.isLoading || workers.isValidating}
           lastUpdated={statsUpdatedAt}
         />
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={pullingFresh}
+          title="Pull node statistics from the cluster right now (bypasses the sampler cache; can take a while)"
+          onClick={pullFreshStats}
+        >
+          <RefreshCw className={pullingFresh ? "animate-spin" : undefined} />
+          Pull fresh
+        </Button>
         <ResyncSpeedSelector />
         <Button variant="outline" disabled={forcing} onClick={() => forceResync("*")}>
           <RefreshCw className={forcing ? "animate-spin" : undefined} />

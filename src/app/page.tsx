@@ -1,6 +1,7 @@
 "use client";
 
-import { useGarage } from "@/lib/api";
+import useSWR from "swr";
+import { getFetcher, useGarage } from "@/lib/api";
 import type {
   ClusterHealth,
   GetClusterStatisticsResponse,
@@ -9,7 +10,7 @@ import type {
   MultiResponse,
 } from "@/lib/garage/types";
 import { formatBytes, formatCount, formatDuration } from "@/lib/format";
-import { useEffect, useState } from "react";
+
 import {
   ErrorBanner,
   LoadingCards,
@@ -50,25 +51,24 @@ export default function DashboardPage() {
   const stats = useGarage<GetClusterStatisticsResponse>("GetClusterStatistics", {
     refreshInterval: 60_000,
   });
-  const nodeStats = useGarage<MultiResponse<LocalNodeStatistics>>(
-    "GetNodeStatistics",
-    { params: { node: "*" }, refreshInterval: REFRESH_HEAVY },
+  // Served from the server's sampler cache — never triggers a cluster pull.
+  const nodeStats = useSWR<{ ts: number; data: MultiResponse<LocalNodeStatistics> }>(
+    "/api/stats/nodes",
+    getFetcher,
+    { refreshInterval: REFRESH_HEAVY, keepPreviousData: true, revalidateOnFocus: false },
   );
+  const nodeStatsData = nodeStats.data?.data;
+  const statsUpdatedAt = nodeStats.data?.ts ?? null;
 
   const h = health.data;
-  const totalResyncQueue = Object.values(nodeStats.data?.success ?? {}).reduce(
+  const totalResyncQueue = Object.values(nodeStatsData?.success ?? {}).reduce(
     (sum, s) => sum + (s.blockManagerStats?.resyncQueueLen ?? 0),
     0,
   );
-  const totalResyncErrors = Object.values(nodeStats.data?.success ?? {}).reduce(
+  const totalResyncErrors = Object.values(nodeStatsData?.success ?? {}).reduce(
     (sum, s) => sum + (s.blockManagerStats?.resyncErrors ?? 0),
     0,
   );
-
-  const [statsUpdatedAt, setStatsUpdatedAt] = useState<number | null>(null);
-  useEffect(() => {
-    if (nodeStats.data) setStatsUpdatedAt(Date.now());
-  }, [nodeStats.data]);
 
   return (
     <div>
@@ -77,7 +77,7 @@ export default function DashboardPage() {
         description="Cluster health and node overview, refreshed automatically."
       >
         <PullIndicator
-          updating={nodeStats.isValidating}
+          updating={nodeStats.isLoading}
           lastUpdated={statsUpdatedAt}
         />
       </PageHeader>
@@ -143,8 +143,8 @@ export default function DashboardPage() {
                   const usedPct = dp
                     ? Math.round(((dp.total - dp.available) / dp.total) * 100)
                     : null;
-                  const ns = nodeStats.data?.success?.[n.id];
-                  const nsErr = nodeStats.data?.error?.[n.id];
+                  const ns = nodeStatsData?.success?.[n.id];
+                  const nsErr = nodeStatsData?.error?.[n.id];
                   return (
                     <TableRow key={n.id}>
                       <TableCell>

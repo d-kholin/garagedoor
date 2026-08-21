@@ -33,9 +33,11 @@ const COMPACT_EVERY_MS = 24 * 3600 * 1000;
 interface SamplerState {
   samples: HistorySample[];
   started: boolean;
-  sampling: boolean;
+  samplingPromise: Promise<void> | null;
   loaded: Promise<void> | null;
   lastCompact: number;
+  /** Full response of the most recent successful pull, served to the UI. */
+  latestFull: { ts: number; res: MultiResponse<LocalNodeStatistics> } | null;
 }
 
 // Survives HMR / route-module reloads within one server process.
@@ -43,9 +45,10 @@ const g = globalThis as unknown as { __garagedoorHistory?: SamplerState };
 const state: SamplerState = (g.__garagedoorHistory ??= {
   samples: [],
   started: false,
-  sampling: false,
+  samplingPromise: null,
   loaded: null,
   lastCompact: 0,
+  latestFull: null,
 });
 
 async function loadFromDisk(): Promise<void> {
@@ -79,9 +82,7 @@ async function compact(): Promise<void> {
   state.lastCompact = Date.now();
 }
 
-async function takeSample(): Promise<void> {
-  if (state.sampling) return; // never overlap slow pulls
-  state.sampling = true;
+async function doSample(): Promise<void> {
   try {
     const res = await garageAdmin<MultiResponse<LocalNodeStatistics>>(
       "GetNodeStatistics",
@@ -98,6 +99,7 @@ async function takeSample(): Promise<void> {
       e[id] = null;
     }
     const sample: HistorySample = { ts: Date.now(), q, e };
+    state.latestFull = { ts: sample.ts, res };
 
     const cutoff = Date.now() - RETENTION_MS;
     state.samples.push(sample);
@@ -108,9 +110,39 @@ async function takeSample(): Promise<void> {
   } catch (err) {
     // A failed sample is a gap in the series, not a crash.
     console.error("[history] sample failed:", err instanceof Error ? err.message : err);
-  } finally {
-    state.sampling = false;
   }
+}
+
+/** Take a sample; concurrent callers share the same in-flight pull. */
+function takeSample(): Promise<void> {
+  if (!state.samplingPromise) {
+    state.samplingPromise = doSample().finally(() => {
+      state.samplingPromise = null;
+    });
+  }
+  return state.samplingPromise;
+}
+
+/**
+ * Latest full node statistics for the UI. Served from the sampler's cache
+ * whenever it is younger than the sampling interval; a real pull happens only
+ * when the cache is stale, missing, or `forceRefresh` is set (which also
+ * contributes an extra history point).
+ */
+export async function getLatestStats(opts: { forceRefresh?: boolean } = {}): Promise<{
+  ts: number;
+  res: MultiResponse<LocalNodeStatistics>;
+}> {
+  startSampler();
+  if (state.loaded) await state.loaded;
+  const fresh =
+    state.latestFull && Date.now() - state.latestFull.ts < SAMPLE_MS + 60_000;
+  if (!opts.forceRefresh && fresh && state.latestFull) return state.latestFull;
+  await takeSample();
+  if (!state.latestFull) {
+    throw new Error("Could not fetch node statistics from the cluster");
+  }
+  return state.latestFull;
 }
 
 export function startSampler(): void {
