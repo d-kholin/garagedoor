@@ -40,12 +40,104 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
 const REFRESH = 5_000;
+
+// Resync aggressiveness presets. Tranquility throttles the resync worker
+// (sleep = tranquility × duration of last operation, 0 = flat out);
+// worker count is the number of parallel resync workers per node (max 8).
+const RESYNC_PRESETS = {
+  default: { label: "Default", tranquility: "2", workers: "1", hint: "Garage defaults — gentle on live traffic" },
+  aggressive: { label: "Aggressive", tranquility: "1", workers: "4", hint: "4 workers, light throttle" },
+  maximum: { label: "Maximum", tranquility: "0", workers: "8", hint: "8 workers, no throttle — may impact live traffic" },
+} as const;
+type PresetKey = keyof typeof RESYNC_PRESETS;
+
+function ResyncSpeedSelector() {
+  const vars = useGaragePost<MultiResponse<Record<string, string>>>(
+    "GetWorkerVariable",
+    { params: { node: "*" }, body: {}, refreshInterval: 15_000 },
+  );
+  const [busy, setBusy] = useState(false);
+
+  // Which preset matches the cluster's current settings; "custom" when nodes
+  // disagree or values match no preset.
+  const current: PresetKey | "custom" | null = useMemo(() => {
+    const nodes = Object.values(vars.data?.success ?? {});
+    if (nodes.length === 0) return null;
+    const tranq = new Set(nodes.map((v) => v["resync-tranquility"]));
+    const workers = new Set(nodes.map((v) => v["resync-worker-count"]));
+    if (tranq.size !== 1 || workers.size !== 1) return "custom";
+    const t = [...tranq][0];
+    const w = [...workers][0];
+    const match = (Object.entries(RESYNC_PRESETS) as [PresetKey, (typeof RESYNC_PRESETS)[PresetKey]][]).find(
+      ([, p]) => p.tranquility === t && p.workers === w,
+    );
+    return match ? match[0] : "custom";
+  }, [vars.data]);
+
+  async function apply(preset: PresetKey) {
+    const p = RESYNC_PRESETS[preset];
+    setBusy(true);
+    try {
+      await garagePost("SetWorkerVariable", {
+        params: { node: "*" },
+        body: { variable: "resync-tranquility", value: p.tranquility },
+      });
+      await garagePost("SetWorkerVariable", {
+        params: { node: "*" },
+        body: { variable: "resync-worker-count", value: p.workers },
+      });
+      toast.success(
+        `Resync speed set to ${p.label} on all nodes (tranquility ${p.tranquility}, ${p.workers} worker${p.workers === "1" ? "" : "s"})`,
+      );
+      vars.mutate();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <Label className="text-sm text-muted-foreground">Resync speed</Label>
+      <Select
+        value={current === "custom" || current === null ? "" : current}
+        onValueChange={(v) => v && apply(v as PresetKey)}
+      >
+        <SelectTrigger className="w-36" disabled={busy || !vars.data}>
+          <SelectValue
+            placeholder={current === "custom" ? "Custom" : "…"}
+          />
+        </SelectTrigger>
+        <SelectContent>
+          {(Object.entries(RESYNC_PRESETS) as [PresetKey, (typeof RESYNC_PRESETS)[PresetKey]][]).map(
+            ([key, p]) => (
+              <SelectItem key={key} value={key}>
+                <div>
+                  <div>{p.label}</div>
+                  <div className="text-xs text-muted-foreground">{p.hint}</div>
+                </div>
+              </SelectItem>
+            ),
+          )}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
 
 function workerStateBadge(w: WorkerInfo) {
   if (typeof w.state === "object" && "throttled" in w.state) {
@@ -183,6 +275,7 @@ export default function ReplicationPage() {
         title="Replication"
         description="Per-node resync queues, background workers, and blocks that are not yet fully replicated."
       >
+        <ResyncSpeedSelector />
         <Button variant="outline" disabled={forcing} onClick={() => forceResync("*")}>
           <RefreshCw className={forcing ? "animate-spin" : undefined} />
           Force resync (all nodes)
