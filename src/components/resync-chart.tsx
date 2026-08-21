@@ -1,11 +1,11 @@
 "use client";
 
-// Live multi-series line chart of per-node resync queue lengths.
-// History accumulates client-side from the page's 5s polls (rolling window).
+// Multi-series line chart of per-node resync queue lengths, fed from the
+// server's persisted history samples.
 // Colors come from the validated .viz-root palette in globals.css; series
 // identity is never color-alone (legend + direct end-labels).
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { formatCount } from "@/lib/format";
 
 export interface ResyncSample {
@@ -14,45 +14,7 @@ export interface ResyncSample {
   values: Record<string, number | null>;
 }
 
-const WINDOW_MS = 15 * 60 * 1000; // keep 15 minutes
 const MAX_SERIES = 8;
-
-// History lives at module scope so it survives navigating away from the page
-// and back — the chart resumes where it left off instead of starting empty.
-let historyStore: ResyncSample[] = [];
-let lastAppended: Record<string, number | null> | null = null;
-
-export function useResyncHistory(
-  latest: Record<string, number | null> | null,
-): ResyncSample[] {
-  const [history, setHistory] = useState<ResyncSample[]>(() => historyStore);
-
-  useEffect(() => {
-    if (!latest || latest === lastAppended) return;
-    lastAppended = latest;
-    const now = Date.now();
-    historyStore = [...historyStore, { ts: now, values: latest }].filter(
-      (s) => now - s.ts <= WINDOW_MS,
-    );
-    setHistory(historyStore);
-  }, [latest]);
-
-  return history;
-}
-
-/** Blocks/min drained over the recent past; null when idle or not enough data. */
-export function drainRate(history: ResyncSample[]): number | null {
-  const total = (s: ResyncSample) =>
-    Object.values(s.values).reduce((a: number, v) => a + (v ?? 0), 0);
-  const now = history[history.length - 1];
-  if (!now) return null;
-  // Use up to the last 90s of samples for a responsive but stable rate.
-  const windowStart = now.ts - 90_000;
-  const past = history.find((s) => s.ts >= windowStart);
-  if (!past || past === now || now.ts === past.ts) return null;
-  const perMin = ((total(past) - total(now)) / (now.ts - past.ts)) * 60_000;
-  return perMin > 0 ? perMin : null;
-}
 
 function timeLabel(ts: number) {
   return new Date(ts).toLocaleTimeString("en-US", {
@@ -106,7 +68,7 @@ export function ResyncChart({
   if (history.length < 2) {
     return (
       <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
-        Collecting samples… the chart appears after a couple of refresh cycles.
+        Not enough samples in this range yet.
       </div>
     );
   }

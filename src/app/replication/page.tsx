@@ -22,11 +22,7 @@ import {
   PullIndicator,
   StatCard,
 } from "@/components/shared";
-import {
-  ResyncChart,
-  drainRate,
-  useResyncHistory,
-} from "@/components/resync-chart";
+import { ResyncChart } from "@/components/resync-chart";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -62,7 +58,6 @@ interface ServerHistorySample {
 }
 
 const RANGES = [
-  { key: "live", label: "15m live" },
   { key: "1", label: "1h" },
   { key: "6", label: "6h" },
   { key: "24", label: "24h" },
@@ -266,26 +261,13 @@ export default function ReplicationPage() {
 
   const statsUpdatedAt = nodeStats.data?.ts ?? null;
 
-  // Rolling per-node queue history for the chart (null = unreachable).
-  const latestReading = useMemo(() => {
-    if (!nodeStatsData) return null;
-    const values: Record<string, number | null> = {};
-    for (const [id, s] of Object.entries(nodeStatsData.success)) {
-      values[id] = s.blockManagerStats?.resyncQueueLen ?? 0;
-    }
-    for (const id of Object.keys(nodeStatsData.error)) {
-      values[id] = null;
-    }
-    return values;
-  }, [nodeStatsData]);
-  const history = useResyncHistory(latestReading);
-  const rate = drainRate(history);
-
-  // Persisted server-side history: powers the longer chart ranges and the
-  // convergence ETA (1h window is a stabler basis than the live 90s rate).
-  const [range, setRange] = useState<RangeKey>("live");
+  // Persisted server-side history: powers the chart and the convergence ETA.
+  // Sampling cadence is GARAGEDOOR_SAMPLE_INTERVAL_MS (default 30 min), so a
+  // client-side "live" view can't work — the stats endpoint serves the same
+  // cached snapshot between samples.
+  const [range, setRange] = useState<RangeKey>("1");
   const serverHistory = useSWR<{ samples: ServerHistorySample[] }>(
-    range === "live" ? null : `/api/history/resync?hours=${range}`,
+    `/api/history/resync?hours=${range}`,
     getFetcher,
     { refreshInterval: 60_000, keepPreviousData: true, revalidateOnFocus: false },
   );
@@ -295,13 +277,14 @@ export default function ReplicationPage() {
     { refreshInterval: 60_000, keepPreviousData: true, revalidateOnFocus: false },
   );
 
-  const chartHistory = useMemo(() => {
-    if (range === "live") return history;
-    return (serverHistory.data?.samples ?? []).map((s) => ({
-      ts: s.ts,
-      values: s.q,
-    }));
-  }, [range, history, serverHistory.data]);
+  const chartHistory = useMemo(
+    () =>
+      (serverHistory.data?.samples ?? []).map((s) => ({
+        ts: s.ts,
+        values: s.q,
+      })),
+    [serverHistory.data],
+  );
 
   const perNode = useMemo(() => {
     const ids = new Set<string>([
@@ -413,8 +396,7 @@ export default function ReplicationPage() {
             tone={totals.queue === 0 ? "good" : "warn"}
             hint={
               totals.queue > 0
-                ? `≤ ${formatBytes(totals.queue * 1024 * 1024)} at 1 MiB max block size` +
-                  (rate ? ` · draining ${Math.round(rate)}/min now` : "")
+                ? `≤ ${formatBytes(totals.queue * 1024 * 1024)} at 1 MiB max block size`
                 : "sum of all node resync queues"
             }
           />
@@ -472,10 +454,11 @@ export default function ReplicationPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {range !== "live" && serverHistory.data?.samples.length === 0 && (
+          {serverHistory.data?.samples.length === 0 && (
             <p className="mb-2 text-xs text-muted-foreground">
-              No persisted samples in this window yet — the server records one sample
-              per minute while Garagedoor is running.
+              No persisted samples in this window yet — the server records a sample
+              every GARAGEDOOR_SAMPLE_INTERVAL_MS (default 30 minutes) while
+              Garagedoor is running.
             </p>
           )}
           <ResyncChart
@@ -489,19 +472,6 @@ export default function ReplicationPage() {
               ]),
             )}
           />
-          {h && (
-            <div className="mt-4 border-t pt-4">
-              <div className="mb-1 flex justify-between text-sm">
-                <span className="text-muted-foreground">
-                  Partition replication (fully replicated / total)
-                </span>
-                <span className="tabular-nums font-medium">
-                  {((h.partitionsAllOk / h.partitions) * 100).toFixed(1)}%
-                </span>
-              </div>
-              <Progress value={(h.partitionsAllOk / h.partitions) * 100} />
-            </div>
-          )}
         </CardContent>
       </Card>
 
