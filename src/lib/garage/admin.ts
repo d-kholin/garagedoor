@@ -87,7 +87,9 @@ export async function garageAdmin<T = unknown>(
     throw new GarageApiError(403, `Endpoint not allowed: ${endpoint}`);
   }
 
-  const url = new URL(`/v2/${endpoint}`, ADMIN_ENDPOINT);
+  // Append to the endpoint rather than using new URL(path, base), which would
+  // drop any path prefix (e.g. a reverse proxy serving Garage under /garage).
+  const url = new URL(`${ADMIN_ENDPOINT.replace(/\/+$/, "")}/v2/${endpoint}`);
   for (const [k, v] of Object.entries(opts.params ?? {})) {
     if (v !== undefined) url.searchParams.set(k, v);
   }
@@ -125,5 +127,17 @@ export async function garageAdmin<T = unknown>(
   }
   const text = await res.text();
   if (!text) return null as T;
-  return JSON.parse(text) as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const looksLikeHtml = /^\s*</.test(text);
+    throw new GarageApiError(
+      502,
+      looksLikeHtml
+        ? "The configured GARAGE_ADMIN_ENDPOINT returned an HTML page instead of JSON. " +
+          "This usually means the URL points at a website, reverse-proxy fallback, or " +
+          "login page rather than the Garage admin API (default port 3903)."
+        : `Garage admin API returned a non-JSON response for ${endpoint}`,
+    );
+  }
 }
