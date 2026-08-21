@@ -33,6 +33,20 @@ Copy `.env.example` to `.env.local` (dev) or set environment variables (prod):
 | `GARAGE_ADMIN_ENDPOINT` | `http://localhost:3903` | Garage admin API v2 base URL |
 | `GARAGE_ADMIN_TOKEN` | — | Admin bearer token (server-side only) |
 | `GARAGE_ADMIN_TIMEOUT_MS` | `8000` | Max wait per admin API call before erroring |
+| `GARAGE_ADMIN_SLOW_TIMEOUT_MS` | `180000` | Timeout for expensive per-node stats endpoints |
+| `GARAGEDOOR_READ_ONLY` | `false` | Refuse all mutating admin calls server-side |
+| `GARAGEDOOR_DATA_DIR` | `./data` (`/data` in Docker) | Persisted resync history location |
+| `GARAGEDOOR_SAMPLE_INTERVAL_MS` | `1800000` | Background stats sampling cadence (30 min) |
+| `GARAGEDOOR_HISTORY_RETENTION_DAYS` | `30` | History retention window |
+
+The server samples per-node resync queues on the configured cadence and persists
+them, powering the chart's 1h/6h/24h/7d ranges and the convergence ETA. Mount a
+volume at `/data` (Docker) to keep history across restarts:
+
+```sh
+docker run -p 3000:3000 -v garagedoor-data:/data \
+  -e GARAGE_ADMIN_ENDPOINT=... -e GARAGE_ADMIN_TOKEN=... garagedoor
+```
 
 > **Security note:** the UI itself has no authentication — deploy it on a trusted
 > network or behind an authenticating reverse proxy.

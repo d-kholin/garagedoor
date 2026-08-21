@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/table";
 
 const REFRESH = 10_000;
-const REFRESH_HEAVY = 20_000;
+const REFRESH_HEAVY = 60_000;
 
 function healthTone(status?: string): "good" | "warn" | "bad" | "default" {
   if (status === "healthy") return "good";

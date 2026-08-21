@@ -24,6 +24,10 @@ RUN addgroup -S app && adduser -S app -G app
 COPY --from=builder --chown=app:app /app/.next/standalone ./
 COPY --from=builder --chown=app:app /app/.next/static ./.next/static
 COPY --from=builder --chown=app:app /app/public ./public
+# Persisted resync history (mount a volume here to keep it across restarts)
+RUN mkdir -p /data && chown app:app /data
+ENV GARAGEDOOR_DATA_DIR=/data
+VOLUME /data
 USER app
 EXPOSE 3000
 CMD ["node", "server.js"]

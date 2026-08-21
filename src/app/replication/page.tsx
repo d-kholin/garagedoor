@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import useSWR from "swr";
 import { toast } from "sonner";
 import { garagePost, getFetcher, useGarage, useGaragePost } from "@/lib/api";
 import type {
@@ -52,13 +53,49 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+interface ServerHistorySample {
+  ts: number;
+  q: Record<string, number | null>;
+  e: Record<string, number | null>;
+}
+
+const RANGES = [
+  { key: "live", label: "15m live" },
+  { key: "1", label: "1h" },
+  { key: "6", label: "6h" },
+  { key: "24", label: "24h" },
+  { key: "168", label: "7d" },
+] as const;
+type RangeKey = (typeof RANGES)[number]["key"];
+
+/**
+ * Net drain rate (blocks/min) and ETA from persisted history: oldest vs
+ * newest sample in the window. Null when there's no net progress.
+ */
+function convergenceEta(
+  samples: ServerHistorySample[] | undefined,
+  currentQueue: number,
+): { rate: number; etaSecs: number; spanSecs: number } | null {
+  if (!samples || samples.length < 2) return null;
+  const total = (s: ServerHistorySample) =>
+    Object.values(s.q).reduce((a: number, v) => a + (v ?? 0), 0);
+  const first = samples[0];
+  const last = samples[samples.length - 1];
+  const dtMin = (last.ts - first.ts) / 60_000;
+  if (dtMin < 2) return null;
+  const rate = (total(first) - total(last)) / dtMin;
+  if (rate <= 0) return null;
+  return { rate, etaSecs: (currentQueue / rate) * 60, spanSecs: dtMin * 60 };
+}
 
 // Health/status are cheap; statistics and worker listings do real work on
 // every node (can take 30s+ on a loaded cluster), so poll those gently.
 // SWR never stacks requests: a poll is skipped while the previous one is
 // still in flight.
 const REFRESH = 10_000;
-const REFRESH_HEAVY = 20_000;
+const REFRESH_HEAVY = 60_000;
 
 // Resync aggressiveness presets. Tranquility throttles the resync worker
 // (sleep = tranquility × duration of last operation, 0 = flat out);
@@ -228,6 +265,28 @@ export default function ReplicationPage() {
   const history = useResyncHistory(latestReading);
   const rate = drainRate(history);
 
+  // Persisted server-side history: powers the longer chart ranges and the
+  // convergence ETA (1h window is a stabler basis than the live 90s rate).
+  const [range, setRange] = useState<RangeKey>("live");
+  const serverHistory = useSWR<{ samples: ServerHistorySample[] }>(
+    range === "live" ? null : `/api/history/resync?hours=${range}`,
+    getFetcher,
+    { refreshInterval: 60_000, keepPreviousData: true, revalidateOnFocus: false },
+  );
+  const etaHistory = useSWR<{ samples: ServerHistorySample[] }>(
+    "/api/history/resync?hours=12",
+    getFetcher,
+    { refreshInterval: 60_000, keepPreviousData: true, revalidateOnFocus: false },
+  );
+
+  const chartHistory = useMemo(() => {
+    if (range === "live") return history;
+    return (serverHistory.data?.samples ?? []).map((s) => ({
+      ts: s.ts,
+      values: s.q,
+    }));
+  }, [range, history, serverHistory.data]);
+
   const perNode = useMemo(() => {
     const ids = new Set<string>([
       ...Object.keys(nodeStats.data?.success ?? {}),
@@ -327,19 +386,35 @@ export default function ReplicationPage() {
             value={formatCount(totals.queue)}
             tone={totals.queue === 0 ? "good" : "warn"}
             hint={
-              rate && totals.queue > 0
-                ? `draining ${Math.round(rate)} blocks/min · ~${formatDuration(
-                    (totals.queue / rate) * 60,
-                  )} left`
+              totals.queue > 0
+                ? `≤ ${formatBytes(totals.queue * 1024 * 1024)} at 1 MiB max block size` +
+                  (rate ? ` · draining ${Math.round(rate)}/min now` : "")
                 : "sum of all node resync queues"
             }
           />
-          <StatCard
-            label="Estimated data to resync"
-            value={`≤ ${formatBytes(totals.queue * 1024 * 1024)}`}
-            hint="upper bound at 1 MiB max block size"
-            tone={totals.queue === 0 ? "good" : "default"}
-          />
+          {(() => {
+            const eta = convergenceEta(etaHistory.data?.samples, totals.queue);
+            return (
+              <StatCard
+                label="Convergence ETA"
+                value={
+                  totals.queue === 0
+                    ? "converged"
+                    : eta
+                      ? `~${formatDuration(eta.etaSecs)}`
+                      : "—"
+                }
+                tone={totals.queue === 0 ? "good" : eta ? "default" : "warn"}
+                hint={
+                  totals.queue === 0
+                    ? "all resync queues empty"
+                    : eta
+                      ? `at ${formatCount(Math.round(eta.rate))} blocks/min (avg over ${formatDuration(eta.spanSecs)})`
+                      : "no net drain measured yet"
+                }
+              />
+            );
+          })()}
           <StatCard
             label="Partitions not fully replicated"
             value={h ? formatCount(partitionsBehind) : "—"}
@@ -357,11 +432,28 @@ export default function ReplicationPage() {
 
       <Card className="mt-6">
         <CardHeader>
-          <CardTitle>Resync queue over time</CardTitle>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle>Resync queue over time</CardTitle>
+            <Tabs value={range} onValueChange={(v) => setRange(v as RangeKey)}>
+              <TabsList>
+                {RANGES.map((r) => (
+                  <TabsTrigger key={r.key} value={r.key}>
+                    {r.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+          </div>
         </CardHeader>
         <CardContent>
+          {range !== "live" && serverHistory.data?.samples.length === 0 && (
+            <p className="mb-2 text-xs text-muted-foreground">
+              No persisted samples in this window yet — the server records one sample
+              per minute while Garagedoor is running.
+            </p>
+          )}
           <ResyncChart
-            history={history}
+            history={chartHistory}
             nodeLabels={Object.fromEntries(
               (status.data?.nodes ?? []).map((n) => [
                 n.id,
