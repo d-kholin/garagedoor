@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { garagePost, useGarage, useGaragePost } from "@/lib/api";
 import type {
@@ -18,6 +18,7 @@ import {
   LoadingCards,
   MonoId,
   PageHeader,
+  PullIndicator,
   StatCard,
 } from "@/components/shared";
 import {
@@ -191,6 +192,11 @@ export default function ReplicationPage() {
     refreshInterval: 30_000,
   });
 
+  const [statsUpdatedAt, setStatsUpdatedAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (nodeStats.data) setStatsUpdatedAt(Date.now());
+  }, [nodeStats.data]);
+
   // Rolling per-node queue history for the chart (null = unreachable).
   const latestReading = useMemo(() => {
     if (!nodeStats.data) return null;
@@ -280,6 +286,10 @@ export default function ReplicationPage() {
         title="Replication"
         description="Per-node resync queues, background workers, and blocks that are not yet fully replicated."
       >
+        <PullIndicator
+          updating={nodeStats.isValidating || workers.isValidating}
+          lastUpdated={statsUpdatedAt}
+        />
         <ResyncSpeedSelector />
         <Button variant="outline" disabled={forcing} onClick={() => forceResync("*")}>
           <RefreshCw className={forcing ? "animate-spin" : undefined} />
@@ -289,7 +299,13 @@ export default function ReplicationPage() {
       <ErrorBanner error={health.error ?? nodeStats.error ?? workers.error} />
 
       {!nodeStats.data && !nodeStats.error ? (
-        <LoadingCards />
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Pulling statistics from every node — on a large cluster this can take a
+            minute or more.
+          </p>
+          <LoadingCards />
+        </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard

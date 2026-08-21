@@ -9,11 +9,13 @@ import type {
   MultiResponse,
 } from "@/lib/garage/types";
 import { formatBytes, formatCount, formatDuration } from "@/lib/format";
+import { useEffect, useState } from "react";
 import {
   ErrorBanner,
   LoadingCards,
   MonoId,
   PageHeader,
+  PullIndicator,
   StatCard,
 } from "@/components/shared";
 import { Badge } from "@/components/ui/badge";
@@ -63,12 +65,22 @@ export default function DashboardPage() {
     0,
   );
 
+  const [statsUpdatedAt, setStatsUpdatedAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (nodeStats.data) setStatsUpdatedAt(Date.now());
+  }, [nodeStats.data]);
+
   return (
     <div>
       <PageHeader
         title="Dashboard"
-        description="Cluster health and node overview, refreshed every 5 seconds."
-      />
+        description="Cluster health and node overview, refreshed automatically."
+      >
+        <PullIndicator
+          updating={nodeStats.isValidating}
+          lastUpdated={statsUpdatedAt}
+        />
+      </PageHeader>
       <ErrorBanner error={health.error} title="Cannot reach Garage admin API" />
 
       {!h && !health.error ? (

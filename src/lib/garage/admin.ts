@@ -11,7 +11,7 @@ const ADMIN_TIMEOUT_MS = parseInt(process.env.GARAGE_ADMIN_TIMEOUT_MS ?? "8000",
 // Statistics/worker endpoints do real work per node (`garage stats` can take
 // 30s+ on a loaded cluster) — give them a much longer leash.
 const ADMIN_SLOW_TIMEOUT_MS = parseInt(
-  process.env.GARAGE_ADMIN_SLOW_TIMEOUT_MS ?? "60000",
+  process.env.GARAGE_ADMIN_SLOW_TIMEOUT_MS ?? "180000",
   10,
 );
 const SLOW_ENDPOINTS = new Set([

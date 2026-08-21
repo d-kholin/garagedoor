@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Loader2 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -78,6 +78,37 @@ export function LoadingCards({ count = 4 }: { count?: number }) {
         <Skeleton key={i} className="h-28 rounded-xl" />
       ))}
     </div>
+  );
+}
+
+/**
+ * Live-fetch status line: spinner + label while a lookup is in flight,
+ * otherwise when the data was last updated. Meant for slow per-node
+ * statistics pulls that can take a minute or more on large clusters.
+ */
+export function PullIndicator({
+  updating,
+  lastUpdated,
+  label = "node statistics",
+}: {
+  updating: boolean;
+  lastUpdated: number | null;
+  label?: string;
+}) {
+  return (
+    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      {updating ? (
+        <>
+          <Loader2 className="size-3.5 animate-spin" />
+          pulling {label}…
+        </>
+      ) : lastUpdated ? (
+        <>
+          updated{" "}
+          {new Date(lastUpdated).toLocaleTimeString("en-US", { hour12: false })}
+        </>
+      ) : null}
+    </span>
   );
 }
 

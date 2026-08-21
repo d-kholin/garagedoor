@@ -54,6 +54,10 @@ export function useGarage<T>(
   return useSWR<T>(key, getFetcher, {
     refreshInterval: opts.refreshInterval,
     keepPreviousData: true,
+    // Serve the cached result when the user navigates back to a page instead
+    // of refiring (potentially very slow) lookups; only refresh on cadence.
+    revalidateOnFocus: false,
+    dedupingInterval: opts.refreshInterval ?? 15_000,
   });
 }
 
@@ -75,6 +79,11 @@ export function useGaragePost<T>(
   return useSWR<T>(
     key,
     () => garagePost<T>(endpoint!, { params: opts.params, body: opts.body }),
-    { refreshInterval: opts.refreshInterval, keepPreviousData: true },
+    {
+      refreshInterval: opts.refreshInterval,
+      keepPreviousData: true,
+      revalidateOnFocus: false,
+      dedupingInterval: opts.refreshInterval ?? 15_000,
+    },
   );
 }

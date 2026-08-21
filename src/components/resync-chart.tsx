@@ -17,19 +17,24 @@ export interface ResyncSample {
 const WINDOW_MS = 15 * 60 * 1000; // keep 15 minutes
 const MAX_SERIES = 8;
 
+// History lives at module scope so it survives navigating away from the page
+// and back — the chart resumes where it left off instead of starting empty.
+let historyStore: ResyncSample[] = [];
+let lastAppended: Record<string, number | null> | null = null;
+
 export function useResyncHistory(
   latest: Record<string, number | null> | null,
 ): ResyncSample[] {
-  const [history, setHistory] = useState<ResyncSample[]>([]);
-  const lastRef = useRef<Record<string, number | null> | null>(null);
+  const [history, setHistory] = useState<ResyncSample[]>(() => historyStore);
 
   useEffect(() => {
-    if (!latest || latest === lastRef.current) return;
-    lastRef.current = latest;
+    if (!latest || latest === lastAppended) return;
+    lastAppended = latest;
     const now = Date.now();
-    setHistory((h) =>
-      [...h, { ts: now, values: latest }].filter((s) => now - s.ts <= WINDOW_MS),
+    historyStore = [...historyStore, { ts: now, values: latest }].filter(
+      (s) => now - s.ts <= WINDOW_MS,
     );
+    setHistory(historyStore);
   }, [latest]);
 
   return history;
