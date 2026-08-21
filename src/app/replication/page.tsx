@@ -52,7 +52,12 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-const REFRESH = 5_000;
+// Health/status are cheap; statistics and worker listings do real work on
+// every node (can take 30s+ on a loaded cluster), so poll those gently.
+// SWR never stacks requests: a poll is skipped while the previous one is
+// still in flight.
+const REFRESH = 10_000;
+const REFRESH_HEAVY = 20_000;
 
 // Resync aggressiveness presets. Tranquility throttles the resync worker
 // (sleep = tranquility × duration of last operation, 0 = flat out);
@@ -67,7 +72,7 @@ type PresetKey = keyof typeof RESYNC_PRESETS;
 function ResyncSpeedSelector() {
   const vars = useGaragePost<MultiResponse<Record<string, string>>>(
     "GetWorkerVariable",
-    { params: { node: "*" }, body: {}, refreshInterval: 15_000 },
+    { params: { node: "*" }, body: {}, refreshInterval: 30_000 },
   );
   const [busy, setBusy] = useState(false);
 
@@ -174,16 +179,16 @@ export default function ReplicationPage() {
   });
   const nodeStats = useGarage<MultiResponse<LocalNodeStatistics>>(
     "GetNodeStatistics",
-    { params: { node: "*" }, refreshInterval: REFRESH },
+    { params: { node: "*" }, refreshInterval: REFRESH_HEAVY },
   );
   const workers = useGaragePost<MultiResponse<WorkerInfo[]>>("ListWorkers", {
     params: { node: "*" },
     body: { busyOnly: false, errorOnly },
-    refreshInterval: REFRESH,
+    refreshInterval: REFRESH_HEAVY,
   });
   const blockErrors = useGarage<MultiResponse<BlockError[]>>("ListBlockErrors", {
     params: { node: "*" },
-    refreshInterval: 15_000,
+    refreshInterval: 30_000,
   });
 
   // Rolling per-node queue history for the chart (null = unreachable).

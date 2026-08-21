@@ -28,7 +28,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-const REFRESH = 5_000;
+const REFRESH = 10_000;
+const REFRESH_HEAVY = 20_000;
 
 function healthTone(status?: string): "good" | "warn" | "bad" | "default" {
   if (status === "healthy") return "good";
@@ -45,11 +46,11 @@ export default function DashboardPage() {
     refreshInterval: REFRESH,
   });
   const stats = useGarage<GetClusterStatisticsResponse>("GetClusterStatistics", {
-    refreshInterval: 30_000,
+    refreshInterval: 60_000,
   });
   const nodeStats = useGarage<MultiResponse<LocalNodeStatistics>>(
     "GetNodeStatistics",
-    { params: { node: "*" }, refreshInterval: REFRESH },
+    { params: { node: "*" }, refreshInterval: REFRESH_HEAVY },
   );
 
   const h = health.data;

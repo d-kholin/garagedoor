@@ -8,6 +8,39 @@ const ADMIN_TOKEN = process.env.GARAGE_ADMIN_TOKEN ?? "";
 // time while Garage's RPCs to a freshly-dead node time out; failing fast keeps
 // the UI updating (it shows an error + last-known data instead of stalling).
 const ADMIN_TIMEOUT_MS = parseInt(process.env.GARAGE_ADMIN_TIMEOUT_MS ?? "8000", 10);
+// Statistics/worker endpoints do real work per node (`garage stats` can take
+// 30s+ on a loaded cluster) — give them a much longer leash.
+const ADMIN_SLOW_TIMEOUT_MS = parseInt(
+  process.env.GARAGE_ADMIN_SLOW_TIMEOUT_MS ?? "60000",
+  10,
+);
+const SLOW_ENDPOINTS = new Set([
+  "GetNodeStatistics",
+  "GetClusterStatistics",
+  "ListWorkers",
+  "GetWorkerInfo",
+  "ListBlockErrors",
+  "LaunchRepairOperation",
+]);
+
+// When true, the proxy refuses every mutating endpoint — the whole app
+// becomes a pure dashboard, enforced server-side.
+export const READ_ONLY =
+  (process.env.GARAGEDOOR_READ_ONLY ?? "").toLowerCase() === "true" ||
+  process.env.GARAGEDOOR_READ_ONLY === "1";
+
+/** POST endpoints that only read state — allowed even in read-only mode. */
+const READONLY_POSTS = new Set([
+  "ListWorkers",
+  "GetWorkerInfo",
+  "GetWorkerVariable",
+  "GetBlockInfo",
+  "PreviewClusterLayoutChanges",
+]);
+
+export function isMutating(endpoint: string): boolean {
+  return ALLOWED_ENDPOINTS[endpoint] === "POST" && !READONLY_POSTS.has(endpoint);
+}
 
 type Method = "GET" | "POST";
 
@@ -86,6 +119,15 @@ export async function garageAdmin<T = unknown>(
   if (!method) {
     throw new GarageApiError(403, `Endpoint not allowed: ${endpoint}`);
   }
+  if (READ_ONLY && isMutating(endpoint)) {
+    throw new GarageApiError(
+      403,
+      `Read-only mode: ${endpoint} is disabled (GARAGEDOOR_READ_ONLY is set)`,
+    );
+  }
+  const timeoutMs = SLOW_ENDPOINTS.has(endpoint)
+    ? ADMIN_SLOW_TIMEOUT_MS
+    : ADMIN_TIMEOUT_MS;
 
   // Append to the endpoint rather than using new URL(path, base), which would
   // drop any path prefix (e.g. a reverse proxy serving Garage under /garage).
@@ -104,13 +146,13 @@ export async function garageAdmin<T = unknown>(
       },
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
       cache: "no-store",
-      signal: AbortSignal.timeout(ADMIN_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (e) {
     if (e instanceof DOMException && e.name === "TimeoutError") {
       throw new GarageApiError(
         504,
-        `Garage admin API did not answer ${endpoint} within ${ADMIN_TIMEOUT_MS}ms ` +
+        `Garage admin API did not answer ${endpoint} within ${timeoutMs}ms ` +
           "(a node may have just gone down; showing last-known data)",
       );
     }
