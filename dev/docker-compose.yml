@@ -1,0 +1,46 @@
+# Local 3-node Garage cluster for developing Garagedoor.
+# Usage:
+#   docker compose -f dev/docker-compose.yml up -d
+#   ./dev/setup.sh          # one-time: connect nodes + apply layout
+#   node dev/seed.mjs       # optional: create test bucket/key/objects
+#
+# Host ports (node 1 only): S3 http://localhost:3900, admin http://localhost:3903
+
+name: garagedoor-dev
+
+services:
+  garage1:
+    image: dxflrs/garage:v2.3.0
+    restart: unless-stopped
+    volumes:
+      - ./garage1.toml:/etc/garage.toml:ro
+      - garage1-meta:/var/lib/garage/meta
+      - garage1-data:/var/lib/garage/data
+    ports:
+      - "3900:3900" # S3 API
+      - "3903:3903" # Admin API
+      - "3902:3902" # S3 web
+
+  garage2:
+    image: dxflrs/garage:v2.3.0
+    restart: unless-stopped
+    volumes:
+      - ./garage2.toml:/etc/garage.toml:ro
+      - garage2-meta:/var/lib/garage/meta
+      - garage2-data:/var/lib/garage/data
+
+  garage3:
+    image: dxflrs/garage:v2.3.0
+    restart: unless-stopped
+    volumes:
+      - ./garage3.toml:/etc/garage.toml:ro
+      - garage3-meta:/var/lib/garage/meta
+      - garage3-data:/var/lib/garage/data
+
+volumes:
+  garage1-meta:
+  garage1-data:
+  garage2-meta:
+  garage2-data:
+  garage3-meta:
+  garage3-data:
