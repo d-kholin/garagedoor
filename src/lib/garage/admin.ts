@@ -4,6 +4,10 @@
 
 const ADMIN_ENDPOINT = process.env.GARAGE_ADMIN_ENDPOINT ?? "http://localhost:3903";
 const ADMIN_TOKEN = process.env.GARAGE_ADMIN_TOKEN ?? "";
+// Cap on any single admin API call. Multi-node fan-outs can hang for a long
+// time while Garage's RPCs to a freshly-dead node time out; failing fast keeps
+// the UI updating (it shows an error + last-known data instead of stalling).
+const ADMIN_TIMEOUT_MS = parseInt(process.env.GARAGE_ADMIN_TIMEOUT_MS ?? "8000", 10);
 
 type Method = "GET" | "POST";
 
@@ -88,15 +92,28 @@ export async function garageAdmin<T = unknown>(
     if (v !== undefined) url.searchParams.set(k, v);
   }
 
-  const res = await fetch(url, {
-    method,
-    headers: {
-      Authorization: `Bearer ${ADMIN_TOKEN}`,
-      ...(opts.body !== undefined ? { "Content-Type": "application/json" } : {}),
-    },
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-    cache: "no-store",
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: {
+        Authorization: `Bearer ${ADMIN_TOKEN}`,
+        ...(opts.body !== undefined ? { "Content-Type": "application/json" } : {}),
+      },
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      cache: "no-store",
+      signal: AbortSignal.timeout(ADMIN_TIMEOUT_MS),
+    });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "TimeoutError") {
+      throw new GarageApiError(
+        504,
+        `Garage admin API did not answer ${endpoint} within ${ADMIN_TIMEOUT_MS}ms ` +
+          "(a node may have just gone down; showing last-known data)",
+      );
+    }
+    throw e;
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
