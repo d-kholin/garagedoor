@@ -30,8 +30,9 @@ function niceTicks(max: number): number[] {
   const raw = max / 3;
   const mag = 10 ** Math.floor(Math.log10(raw));
   const step = [1, 2, 5, 10].map((m) => m * mag).find((s) => s >= raw) ?? mag * 10;
+  const top = Math.ceil(max / step - 0.001) * step;
   const ticks: number[] = [];
-  for (let v = 0; v <= max + step * 0.001; v += step) ticks.push(v);
+  for (let v = 0; v <= top + step * 0.001; v += step) ticks.push(v);
   return ticks;
 }
 
