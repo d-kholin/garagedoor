@@ -16,6 +16,16 @@ export interface ResyncSample {
 
 const MAX_SERIES = 8;
 
+// Axis ticks are always 1/2/5 multiples (see niceTicks), so one decimal is
+// exact: 2,500,000 -> "2.5M". Full numbers stay in the tooltip/legend.
+function compactCount(n: number): string {
+  const trim = (v: number) => String(parseFloat(v.toFixed(1)));
+  if (n >= 1e9) return `${trim(n / 1e9)}B`;
+  if (n >= 1e6) return `${trim(n / 1e6)}M`;
+  if (n >= 1e4) return `${trim(n / 1e3)}k`;
+  return n.toLocaleString("en-US");
+}
+
 function timeLabel(ts: number) {
   return new Date(ts).toLocaleTimeString("en-US", {
     hour12: false,
@@ -48,9 +58,6 @@ export function ResyncChart({
 
   const W = 800;
   const H = 220;
-  const PAD = { top: 12, right: 76, bottom: 24, left: 44 };
-  const plotW = W - PAD.left - PAD.right;
-  const plotH = H - PAD.top - PAD.bottom;
 
   const { seriesIds, tMin, tMax, yMax, ticks } = useMemo(() => {
     const ids = [...new Set(history.flatMap((s) => Object.keys(s.values)))]
@@ -65,6 +72,41 @@ export function ResyncChart({
     const ticks = niceTicks(peak);
     return { seriesIds: ids, tMin, tMax, yMax: ticks[ticks.length - 1] || peak, ticks };
   }, [history]);
+
+  // Right gutter sized to the longest end-label so names never fall off the
+  // edge, capped so a long hostname can't eat the plot (past the cap labels
+  // are ellipsized; the legend below always carries the full name). Widths
+  // are estimated per glyph (10px sans in an 800-unit viewBox) with slack —
+  // no DOM measurement needed, and pad + clip share the same estimate so
+  // they can't disagree. 18 covers the dot marker + gaps.
+  const seriesLabel = (id: string) => nodeLabels[id] ?? id.slice(0, 8);
+  const textWidth = (s: string) => {
+    let w = 0;
+    for (const c of s) {
+      if (/[ilIjft.,:()' ]/.test(c)) w += 3.2;
+      else if (/[mwMW]/.test(c)) w += 9;
+      else if (/[A-Z0-9]/.test(c)) w += 6.5;
+      else w += 5.8;
+    }
+    return w * 1.08;
+  };
+  const MAX_LABEL_PX = 150;
+  const clipLabel = (s: string) => {
+    if (textWidth(s) <= MAX_LABEL_PX) return s;
+    let out = "";
+    for (const c of s) {
+      if (textWidth(`${out}${c}…`) > MAX_LABEL_PX) break;
+      out += c;
+    }
+    return `${out}…`;
+  };
+  const gutter = Math.max(
+    24,
+    ...seriesIds.map((id) => textWidth(clipLabel(seriesLabel(id)))),
+  );
+  const PAD = { top: 12, right: 18 + gutter, bottom: 24, left: 44 };
+  const plotW = W - PAD.left - PAD.right;
+  const plotH = H - PAD.top - PAD.bottom;
 
   if (history.length < 2) {
     return (
@@ -158,7 +200,7 @@ export function ResyncChart({
               fill="var(--viz-muted)"
               style={{ fontVariantNumeric: "tabular-nums" }}
             >
-              {formatCount(t)}
+              {compactCount(t)}
             </text>
           </g>
         ))}
@@ -202,7 +244,7 @@ export function ResyncChart({
           <text key={p.id} x={W - PAD.right + 6} y={p.ly + 3.5} fontSize={10}>
             <tspan fill={`var(--viz-series-${p.slot})`}>●</tspan>
             <tspan dx={3} fill="var(--viz-muted)">
-              {nodeLabels[p.id] ?? p.id.slice(0, 8)}
+              {clipLabel(seriesLabel(p.id))}
             </tspan>
           </text>
         ))}
@@ -254,7 +296,7 @@ export function ResyncChart({
                   style={{ background: `var(--viz-series-${p.slot})` }}
                 />
                 <span className="text-muted-foreground">
-                  {nodeLabels[p.id] ?? p.id.slice(0, 8)}
+                  {seriesLabel(p.id)}
                 </span>
                 <span className="font-medium tabular-nums">
                   {hoverSample.values[p.id] === null ||
@@ -274,7 +316,7 @@ export function ResyncChart({
                 style={{ background: `var(--viz-series-${p.slot})` }}
               />
               <span className="text-muted-foreground">
-                {nodeLabels[p.id] ?? p.id.slice(0, 8)}
+                {seriesLabel(p.id)}
               </span>
             </span>
           ))
