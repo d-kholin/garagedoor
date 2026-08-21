@@ -12,6 +12,7 @@ import type {
   WorkerInfo,
 } from "@/lib/garage/types";
 import { formatBytes, formatCount, formatDuration } from "@/lib/format";
+import { RefreshCw } from "lucide-react";
 import {
   ErrorBanner,
   LoadingCards,
@@ -19,6 +20,11 @@ import {
   PageHeader,
   StatCard,
 } from "@/components/shared";
+import {
+  ResyncChart,
+  drainRate,
+  useResyncHistory,
+} from "@/components/resync-chart";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -88,6 +94,21 @@ export default function ReplicationPage() {
     refreshInterval: 15_000,
   });
 
+  // Rolling per-node queue history for the chart (null = unreachable).
+  const latestReading = useMemo(() => {
+    if (!nodeStats.data) return null;
+    const values: Record<string, number | null> = {};
+    for (const [id, s] of Object.entries(nodeStats.data.success)) {
+      values[id] = s.blockManagerStats?.resyncQueueLen ?? 0;
+    }
+    for (const id of Object.keys(nodeStats.data.error)) {
+      values[id] = null;
+    }
+    return values;
+  }, [nodeStats.data]);
+  const history = useResyncHistory(latestReading);
+  const rate = drainRate(history);
+
   const perNode = useMemo(() => {
     const ids = new Set<string>([
       ...Object.keys(nodeStats.data?.success ?? {}),
@@ -121,6 +142,28 @@ export default function ReplicationPage() {
   const h = health.data;
   const partitionsBehind = h ? h.partitions - h.partitionsAllOk : 0;
 
+  const [forcing, setForcing] = useState(false);
+  async function forceResync(node: string) {
+    setForcing(true);
+    try {
+      await garagePost("LaunchRepairOperation", {
+        params: { node },
+        body: { repairType: "blocks" },
+      });
+      toast.success(
+        node === "*"
+          ? "Block repair launched on all nodes — queues will re-check and sync immediately"
+          : "Block repair launched on node",
+      );
+      nodeStats.mutate();
+      workers.mutate();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setForcing(false);
+    }
+  }
+
   async function retryAll(node: string) {
     try {
       await garagePost("RetryBlockResync", {
@@ -139,7 +182,12 @@ export default function ReplicationPage() {
       <PageHeader
         title="Replication"
         description="Per-node resync queues, background workers, and blocks that are not yet fully replicated."
-      />
+      >
+        <Button variant="outline" disabled={forcing} onClick={() => forceResync("*")}>
+          <RefreshCw className={forcing ? "animate-spin" : undefined} />
+          Force resync (all nodes)
+        </Button>
+      </PageHeader>
       <ErrorBanner error={health.error ?? nodeStats.error ?? workers.error} />
 
       {!nodeStats.data && !nodeStats.error ? (
@@ -150,7 +198,13 @@ export default function ReplicationPage() {
             label="Blocks awaiting resync"
             value={formatCount(totals.queue)}
             tone={totals.queue === 0 ? "good" : "warn"}
-            hint="sum of all node resync queues"
+            hint={
+              rate && totals.queue > 0
+                ? `draining ${Math.round(rate)} blocks/min · ~${formatDuration(
+                    (totals.queue / rate) * 60,
+                  )} left`
+                : "sum of all node resync queues"
+            }
           />
           <StatCard
             label="Estimated data to resync"
@@ -173,25 +227,37 @@ export default function ReplicationPage() {
         </div>
       )}
 
-      {h && (
-        <Card className="mt-6">
-          <CardContent>
-            <div className="flex items-center gap-4">
-              <div className="flex-1">
-                <div className="mb-1 flex justify-between text-sm">
-                  <span className="text-muted-foreground">
-                    Partition replication (fully replicated / total)
-                  </span>
-                  <span className="tabular-nums font-medium">
-                    {((h.partitionsAllOk / h.partitions) * 100).toFixed(1)}%
-                  </span>
-                </div>
-                <Progress value={(h.partitionsAllOk / h.partitions) * 100} />
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>Resync queue over time</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ResyncChart
+            history={history}
+            nodeLabels={Object.fromEntries(
+              (status.data?.nodes ?? []).map((n) => [
+                n.id,
+                n.hostname
+                  ? `${n.hostname}${n.role?.zone ? ` (${n.role.zone})` : ""}`
+                  : n.id.slice(0, 8),
+              ]),
+            )}
+          />
+          {h && (
+            <div className="mt-4 border-t pt-4">
+              <div className="mb-1 flex justify-between text-sm">
+                <span className="text-muted-foreground">
+                  Partition replication (fully replicated / total)
+                </span>
+                <span className="tabular-nums font-medium">
+                  {((h.partitionsAllOk / h.partitions) * 100).toFixed(1)}%
+                </span>
               </div>
+              <Progress value={(h.partitionsAllOk / h.partitions) * 100} />
             </div>
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </CardContent>
+      </Card>
 
       <div className="mt-8 space-y-6">
         {perNode.map((n) => {
@@ -217,6 +283,16 @@ export default function ReplicationPage() {
                       <Badge variant="destructive">unreachable</Badge>
                     ) : (
                       <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={forcing}
+                          title="Launch a blocks repair on this node: re-scan the local block store and immediately resync anything missing"
+                          onClick={() => forceResync(n.id)}
+                        >
+                          <RefreshCw />
+                          Force resync
+                        </Button>
                         <span className="text-muted-foreground">
                           Resync queue:{" "}
                           <span className="font-medium text-foreground tabular-nums">
