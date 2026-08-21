@@ -18,6 +18,7 @@ export interface HistorySample {
 
 const DATA_DIR = process.env.GARAGEDOOR_DATA_DIR ?? "./data";
 const FILE = path.join(DATA_DIR, "resync-history.jsonl");
+const LATEST_FILE = path.join(DATA_DIR, "latest-stats.json");
 // Default 30 minutes: GetNodeStatistics does real work on every node, so the
 // background sampler must stay light on production clusters. Lower it (e.g.
 // 60000) for dev clusters where stats are instant.
@@ -72,6 +73,16 @@ async function loadFromDisk(): Promise<void> {
   }
   samples.sort((a, b) => a.ts - b.ts);
   state.samples = samples;
+  // Restore the last full stats response so a restart serves the UI instantly
+  // instead of forcing a live pull on first page load.
+  try {
+    const latest = JSON.parse(await readFile(LATEST_FILE, "utf8"));
+    if (latest && typeof latest.ts === "number" && latest.res) {
+      state.latestFull = latest;
+    }
+  } catch {
+    // no persisted latest yet
+  }
   await compact();
 }
 
@@ -106,6 +117,7 @@ async function doSample(): Promise<void> {
     while (state.samples.length && state.samples[0].ts < cutoff) state.samples.shift();
 
     await appendFile(FILE, JSON.stringify(sample) + "\n");
+    await writeFile(LATEST_FILE, JSON.stringify(state.latestFull));
     if (Date.now() - state.lastCompact > COMPACT_EVERY_MS) await compact();
   } catch (err) {
     // A failed sample is a gap in the series, not a crash.
