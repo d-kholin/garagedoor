@@ -11,7 +11,6 @@ import type {
   ListKeysResponse,
 } from "@/lib/garage/types";
 import { formatBytes, formatCount, formatDate } from "@/lib/format";
-import { ObjectBrowser } from "@/components/object-browser";
 import { ErrorBanner, MonoId, PageHeader, StatCard } from "@/components/shared";
 import {
   AlertDialog,
@@ -549,7 +548,6 @@ export default function BucketDetailPage({
             <TabsList>
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="permissions">Permissions</TabsTrigger>
-              <TabsTrigger value="browse">Browse</TabsTrigger>
               <TabsTrigger value="danger">Danger</TabsTrigger>
             </TabsList>
             <TabsContent value="overview" className="mt-4 space-y-4">
@@ -561,16 +559,6 @@ export default function BucketDetailPage({
             </TabsContent>
             <TabsContent value="permissions" className="mt-4">
               <PermissionsTab bucket={b} onChanged={() => bucket.mutate()} />
-            </TabsContent>
-            <TabsContent value="browse" className="mt-4">
-              {name ? (
-                <ObjectBrowser bucketId={b.id} bucketName={name} />
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  This bucket has no global alias, so it cannot be browsed via the S3 API.
-                  Add a global alias first.
-                </p>
-              )}
             </TabsContent>
             <TabsContent value="danger" className="mt-4">
               <DangerZone bucket={b} />

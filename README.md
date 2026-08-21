@@ -18,9 +18,6 @@ browser only ever talks to this app.
   ("retry all now"), and metadata table queues (merkle/GC/insert).
 - **Buckets** — create buckets, global aliases, quotas, static website hosting
   config, per-bucket stats, incomplete-upload cleanup, delete (empty buckets only).
-- **Object browser** — strictly **read-only**: list and download. The backing API
-  routes implement no write or delete operations at all. Credentials are
-  auto-provisioned as a read-only key (`garagedoor-browse`) via the admin API.
 - **Access keys** — create, import, rename, delete keys; grant/revoke per-bucket
   read/write/owner permissions from both the key page and the bucket page.
 - **Cluster layout** — assign/edit/remove node roles (zone, capacity, tags,
@@ -35,8 +32,7 @@ Copy `.env.example` to `.env.local` (dev) or set environment variables (prod):
 | --- | --- | --- |
 | `GARAGE_ADMIN_ENDPOINT` | `http://localhost:3903` | Garage admin API v2 base URL |
 | `GARAGE_ADMIN_TOKEN` | — | Admin bearer token (server-side only) |
-| `GARAGE_S3_ENDPOINT` | `http://localhost:3900` | S3 API URL, used by the object browser |
-| `GARAGE_S3_REGION` | `garage` | S3 region name |
+| `GARAGE_ADMIN_TIMEOUT_MS` | `8000` | Max wait per admin API call before erroring |
 
 > **Security note:** the UI itself has no authentication — deploy it on a trusted
 > network or behind an authenticating reverse proxy.
@@ -63,7 +59,6 @@ docker build -t garagedoor .
 docker run -p 3000:3000 \
   -e GARAGE_ADMIN_ENDPOINT=http://your-garage:3903 \
   -e GARAGE_ADMIN_TOKEN=your-admin-token \
-  -e GARAGE_S3_ENDPOINT=http://your-garage:3900 \
   garagedoor
 ```
 

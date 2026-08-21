@@ -3,7 +3,6 @@
 # Run:    docker run -p 3000:3000 \
 #           -e GARAGE_ADMIN_ENDPOINT=http://garage:3903 \
 #           -e GARAGE_ADMIN_TOKEN=... \
-#           -e GARAGE_S3_ENDPOINT=http://garage:3900 \
 #           garagedoor
 
 FROM node:24-alpine AS deps

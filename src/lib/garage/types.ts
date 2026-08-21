@@ -214,24 +214,6 @@ export interface PreviewClusterLayoutChangesResponse {
   error?: string;
 }
 
-// ---------- Object browser (server-side S3 proxy) ----------
-
-export interface BrowseObject {
-  key: string;
-  size: number;
-  lastModified: string;
-  etag?: string;
-}
-
-export interface BrowseListResponse {
-  prefix: string;
-  delimiter: string;
-  commonPrefixes: string[];
-  objects: BrowseObject[];
-  isTruncated: boolean;
-  nextContinuationToken?: string;
-}
-
 // ---------- Object inspection ----------
 
 export interface InspectObjectVersion {
