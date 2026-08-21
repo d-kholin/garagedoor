@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { garagePost, useGarage, useGaragePost } from "@/lib/api";
+import { garagePost, getFetcher, useGarage, useGaragePost } from "@/lib/api";
 import type {
   BlockError,
   ClusterHealth,
@@ -187,10 +187,26 @@ export default function ReplicationPage() {
     body: { busyOnly: false, errorOnly },
     refreshInterval: REFRESH_HEAVY,
   });
-  const blockErrors = useGarage<MultiResponse<BlockError[]>>("ListBlockErrors", {
-    params: { node: "*" },
-    refreshInterval: 30_000,
-  });
+  // Errored-block details are load-on-demand only: ListBlockErrors returns
+  // EVERY errored block (potentially millions on a recovering cluster) and
+  // must never be polled automatically.
+  const [blockErrorsByNode, setBlockErrorsByNode] = useState<
+    Record<string, BlockError[]>
+  >({});
+  const [loadingErrorsFor, setLoadingErrorsFor] = useState<string | null>(null);
+  async function loadBlockErrors(nodeId: string) {
+    setLoadingErrorsFor(nodeId);
+    try {
+      const res = await getFetcher<MultiResponse<BlockError[]>>(
+        `/api/garage/ListBlockErrors?node=${nodeId}`,
+      );
+      setBlockErrorsByNode((m) => ({ ...m, [nodeId]: res.success?.[nodeId] ?? [] }));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoadingErrorsFor(null);
+    }
+  }
 
   const [statsUpdatedAt, setStatsUpdatedAt] = useState<number | null>(null);
   useEffect(() => {
@@ -223,20 +239,18 @@ export default function ReplicationPage() {
       stats: nodeStats.data?.success?.[id],
       statsError: nodeStats.data?.error?.[id],
       workers: workers.data?.success?.[id] ?? [],
-      blockErrors: blockErrors.data?.success?.[id] ?? [],
+      blockErrors: blockErrorsByNode[id],
     }));
-  }, [nodeStats.data, workers.data, blockErrors.data]);
+  }, [nodeStats.data, workers.data, blockErrorsByNode]);
 
   const totals = useMemo(() => {
     let queue = 0;
     let errors = 0;
-    let errorBlocks = 0;
     for (const n of perNode) {
       queue += n.stats?.blockManagerStats?.resyncQueueLen ?? 0;
       errors += n.stats?.blockManagerStats?.resyncErrors ?? 0;
-      errorBlocks += n.blockErrors.length;
     }
-    return { queue, errors, errorBlocks };
+    return { queue, errors };
   }, [perNode]);
 
   // Estimate bytes not yet fully replicated: resync queue length × average
@@ -274,7 +288,7 @@ export default function ReplicationPage() {
         body: { all: true },
       });
       toast.success("Resync retry triggered for all errored blocks");
-      blockErrors.mutate();
+      if (node !== "*") loadBlockErrors(node);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     }
@@ -529,11 +543,31 @@ export default function ReplicationPage() {
                   </div>
                 )}
 
-                {n.blockErrors.length > 0 && (
+                {(bm?.resyncErrors ?? 0) > 0 && !n.blockErrors && (
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm text-red-500">
+                      {formatCount(bm?.resyncErrors)} block(s) in error state
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={loadingErrorsFor === n.id}
+                      onClick={() => loadBlockErrors(n.id)}
+                    >
+                      {loadingErrorsFor === n.id ? "Loading…" : "Load details"}
+                    </Button>
+                    <span className="text-xs text-muted-foreground">
+                      fetches the full error list from this node — can be slow when
+                      the count is large
+                    </span>
+                  </div>
+                )}
+
+                {n.blockErrors && n.blockErrors.length > 0 && (
                   <div>
                     <div className="mb-2 flex items-center justify-between">
                       <h3 className="text-sm font-medium text-red-500">
-                        {n.blockErrors.length} block(s) in error state
+                        {formatCount(n.blockErrors.length)} block(s) in error state
                       </h3>
                       <Button size="sm" variant="outline" onClick={() => retryAll(n.id)}>
                         Retry all now
