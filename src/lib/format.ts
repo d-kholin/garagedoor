@@ -7,6 +7,19 @@ export function formatBytes(bytes: number | null | undefined): string {
   return `${value >= 100 ? value.toFixed(0) : value >= 10 ? value.toFixed(1) : value.toFixed(2)} ${units[i]}`;
 }
 
+/**
+ * Decimal (SI) byte units — used for cluster layout capacities to match
+ * Garage's own CLI output (1 GB = 10^9 bytes, not 2^30).
+ */
+export function formatBytesSI(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined) return "—";
+  if (bytes === 0) return "0 B";
+  const units = ["B", "kB", "MB", "GB", "TB", "PB"];
+  const i = Math.min(Math.floor(Math.log10(Math.abs(bytes)) / 3), units.length - 1);
+  const value = bytes / 1000 ** i;
+  return `${value >= 100 ? value.toFixed(0) : value >= 10 ? value.toFixed(1) : value.toFixed(2)} ${units[i]}`;
+}
+
 export function formatCount(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
   return n.toLocaleString("en-US");

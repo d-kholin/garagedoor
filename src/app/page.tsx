@@ -9,7 +9,7 @@ import type {
   LocalNodeStatistics,
   MultiResponse,
 } from "@/lib/garage/types";
-import { formatBytes, formatCount, formatDuration } from "@/lib/format";
+import { formatBytes, formatBytesSI, formatCount, formatDuration } from "@/lib/format";
 
 import {
   ErrorBanner,
@@ -173,7 +173,7 @@ export default function DashboardPage() {
                       <TableCell>
                         {n.role
                           ? n.role.capacity != null
-                            ? formatBytes(n.role.capacity)
+                            ? formatBytesSI(n.role.capacity)
                             : "gateway"
                           : "no role"}
                       </TableCell>

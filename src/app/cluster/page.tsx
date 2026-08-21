@@ -9,7 +9,7 @@ import type {
   GetClusterStatusResponse,
   PreviewClusterLayoutChangesResponse,
 } from "@/lib/garage/types";
-import { formatBytes } from "@/lib/format";
+import { formatBytesSI } from "@/lib/format";
 import { ErrorBanner, MonoId, PageHeader } from "@/components/shared";
 import {
   AlertDialog,
@@ -51,13 +51,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-const GIB = 1024 ** 3;
+// Layout capacities use decimal SI bytes, matching Garage's CLI (1 GB = 10^9).
+const GB = 1000 ** 3;
 
 interface RoleForm {
   id: string;
   hostname?: string | null;
   zone: string;
-  capacityGib: string;
+  capacityGb: string;
   gateway: boolean;
   tags: string;
 }
@@ -85,7 +86,7 @@ function RoleEditorDialog({
               zone: state.zone.trim() || "default",
               capacity: state.gateway
                 ? null
-                : Math.round(parseFloat(state.capacityGib || "0") * GIB),
+                : Math.round(parseFloat(state.capacityGb || "0") * GB),
               tags: state.tags
                 .split(",")
                 .map((t) => t.trim())
@@ -136,14 +137,14 @@ function RoleEditorDialog({
           </div>
           {!state.gateway && (
             <div className="space-y-2">
-              <Label htmlFor="capacity">Capacity (GiB)</Label>
+              <Label htmlFor="capacity">Capacity (GB)</Label>
               <Input
                 id="capacity"
                 type="number"
                 min="0"
                 step="any"
-                value={state.capacityGib}
-                onChange={(e) => setState({ ...state, capacityGib: e.target.value })}
+                value={state.capacityGb}
+                onChange={(e) => setState({ ...state, capacityGb: e.target.value })}
               />
             </div>
           )}
@@ -163,7 +164,7 @@ function RoleEditorDialog({
           </Button>
           <Button
             onClick={save}
-            disabled={busy || (!state.gateway && !parseFloat(state.capacityGib || "0"))}
+            disabled={busy || (!state.gateway && !parseFloat(state.capacityGb || "0"))}
           >
             Stage change
           </Button>
@@ -233,7 +234,7 @@ export default function ClusterLayoutPage() {
       <PageHeader
         title="Cluster Layout"
         description={
-          l ? `Current layout version ${l.version}. Partition size ${formatBytes(l.partitionSize)}.` : undefined
+          l ? `Current layout version ${l.version}. Partition size ${formatBytesSI(l.partitionSize)}.` : undefined
         }
       />
       <ErrorBanner error={layout.error ?? status.error} />
@@ -267,10 +268,10 @@ export default function ClusterLayoutPage() {
                         </TableCell>
                         <TableCell>{r.zone}</TableCell>
                         <TableCell>
-                          {r.capacity != null ? formatBytes(r.capacity) : <Badge variant="outline">gateway</Badge>}
+                          {r.capacity != null ? formatBytesSI(r.capacity) : <Badge variant="outline">gateway</Badge>}
                         </TableCell>
                         <TableCell>
-                          {r.usableCapacity != null ? formatBytes(r.usableCapacity) : "—"}
+                          {r.usableCapacity != null ? formatBytesSI(r.usableCapacity) : "—"}
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
                           {r.storedPartitions ?? "—"}
@@ -293,8 +294,8 @@ export default function ClusterLayoutPage() {
                                   id: r.id,
                                   hostname: hostnameOf(r.id),
                                   zone: r.zone,
-                                  capacityGib:
-                                    r.capacity != null ? String(r.capacity / GIB) : "100",
+                                  capacityGb:
+                                    r.capacity != null ? String(r.capacity / GB) : "100",
                                   gateway: r.capacity == null,
                                   tags: r.tags.join(", "),
                                 })
@@ -357,7 +358,7 @@ export default function ClusterLayoutPage() {
                             id: n.id,
                             hostname: n.hostname,
                             zone: "",
-                            capacityGib: "100",
+                            capacityGb: "100",
                             gateway: false,
                             tags: "",
                           })
@@ -395,7 +396,7 @@ export default function ClusterLayoutPage() {
                       {!("remove" in s) && (
                         <span className="text-muted-foreground">
                           zone {s.zone},{" "}
-                          {s.capacity != null ? formatBytes(s.capacity) : "gateway"}
+                          {s.capacity != null ? formatBytesSI(s.capacity) : "gateway"}
                           {s.tags.length > 0 && `, tags: ${s.tags.join(", ")}`}
                         </span>
                       )}
